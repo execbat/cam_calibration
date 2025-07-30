@@ -11,3 +11,16 @@ clients:
     target_port: 59153
     target_address: "127.0.0.1"
 
+
+camera_manager:
+  LABEL_FILENAME : 'teat_label_map.pbtxt'
+  PATH_TO_LABELS : './teat_label_map.pbtxt' #download_labels(LABEL_FILENAME) 
+  PATH_TO_SAVED_MODEL : '/home/oem/obj_det/teat_inference_graph6/saved_model'
+  
+  SENSOR_IP : "192.168.178.69"
+  xmlrpc-port : 50010
+  index : 0
+  config_path_calibration_setting : "sample_config.json"
+  config_path_work_inference_setting : "sample_config.json"
+  root_dir : "/mnt/tagmii1"
+
