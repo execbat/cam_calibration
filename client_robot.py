@@ -29,12 +29,16 @@ if __name__ == '__main__':
     watchDog_in = '0'
     
     while True:
-        #Send
+        ################################################
+        # SENDING MESSAGES TO ROBOT SERVER-SUBPROCESS
+        ################################################  
         TransmitData = telegram
         SendData(TransmitData, UDPClientSocket, server_address)
 
 
-        #Receive
+        ################################################
+        # RECEIVING MESSAGES FROM ROBOT SERVER-SUBPROCESS
+        ################################################ 
         bytesAddressPair = UDPClientSocket.recvfrom(4096)
 
         ReceivedMessage = bytesAddressPair[0]
@@ -43,7 +47,6 @@ if __name__ == '__main__':
         # clientIP = "Client IP Address:{}".format(address)
         #print(clientMsg)
         #print(clientIP)
-
         received_dict = extract_xml(ReceivedMessage)
         print('robot_received_telegram',ReceivedMessage)
 
@@ -55,7 +58,9 @@ if __name__ == '__main__':
 
 
 
-
+        ################################################
+        # PREPARING THE MESSAGE TO BE SENT
+        ################################################ 
         sent_mess_list = list() # List of dictionaries. every dictionary will be the element of ElementTree
         sent_mess_list.append({"Sen" : {'Type' : 'KRC'}})  
         sent_mess_list.append({'WatchDog_out': str(1 - int(watchDog_in))})                        
@@ -63,6 +68,7 @@ if __name__ == '__main__':
         sent_mess_list.append({'Position_reached': '0'})
         sent_mess_list.append({'Need_cam_cal': '0'})        
         sent_mess_list.append({'Screenshot': '0'}) 
+        sent_mess_list.append({'DEF_RIst': {'X': '0', 'Y': '0', 'Z': '0', 'A': '0', 'B': '0', 'C': '0'}}) 
         sent_mess_list.append({'IPOC': str(int(received_dict['IPOC']) + 1)})
 
         #cresting a new telegram to send

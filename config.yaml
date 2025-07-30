@@ -23,4 +23,5 @@ camera_manager:
   config_path_calibration_setting : "sample_config.json"
   config_path_work_inference_setting : "sample_config.json"
   root_dir : "/mnt/tagmii1"
+  num_calib_positions : 20
 
