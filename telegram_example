@@ -1,0 +1,9 @@
+robot_received_telegram:
+b'<Sen Type="ImFree"><XYZ1 X="0.0" Y="0.0" Z="0.0" /><XYZ2 X="0.0" Y="0.0" Z="0.0" /><XYZ3 X="0.0" Y="0.0" Z="0.0" /><XYZ4 X="0.0" Y="0.0" Z="0.0" /><CAM_CAL_RES X="0.0" Y="0.0" Z="0.0" A="0.0" B="0.0" C="0.0" /><WatchDog_in>0</WatchDog_in><Frame_assign>0</Frame_assign><Move_next_pt>0</Move_next_pt><Cam_cal_in_proc>0</Cam_cal_in_proc><See_4_targets>0</See_4_targets><IPOC>0</IPOC></Sen>'
+
+robot_sending_telegram:
+b'<WatchDog_out>1<Frame_assigned>0</Frame_assigned><Position_reached>0</Position_reached><Need_cam_cal>0</Need_cam_cal><Screenshot>0</Screenshot><IPOC>3522</IPOC></WatchDog_out>'
+
+
+now
+b'<Sen Type="ImFree"><XYZ1 X="0.0" Y="0.0" Z="0.0" /><XYZ2 X="0.0" Y="0.0" Z="0.0" /><XYZ3 X="0.0" Y="0.0" Z="0.0" /><XYZ4 X="0.0" Y="0.0" Z="0.0" /><CAM_CAL_RES X="0.0" Y="0.0" Z="0.0" A="0.0" B="0.0" C="0.0" /><WatchDog_in>0</WatchDog_in><Frame_assign>0</Frame_assign><Move_next_pt>0</Move_next_pt><Cam_cal_in_proc>0</Cam_cal_in_proc><See_4_targets>0</See_4_targets><IPOC>3</IPOC></Sen>'

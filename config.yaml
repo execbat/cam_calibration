@@ -1,0 +1,13 @@
+server:
+  robot_port: 59152
+  camera_port: 59153
+  address: "127.0.0.1"
+
+clients:
+  robot:
+    target_port: 59152
+    target_address: "127.0.0.1"
+  camera:
+    target_port: 59153
+    target_address: "127.0.0.1"
+
