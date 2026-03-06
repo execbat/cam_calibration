@@ -23,8 +23,9 @@ def routine_for_camera(server_address, port, mess_input, mess_output):
     position_reached = '0' 
     need_cam_cal = '0'        
     screenshot = '0' 
+    RIst = {'X': '0.0', 'Y': '0.0', 'Z': '0.0', 'A': '0.0', 'B': '0.0', 'C': '0.0'}
     
-    
+    print("Server foutine for camera has started")
     while True:
         telegram_from_robot = None
         try:
@@ -45,7 +46,7 @@ def routine_for_camera(server_address, port, mess_input, mess_output):
                     position_reached = telegram_from_robot["Position_reached"]
                     need_cam_cal = telegram_from_robot["Need_cam_cal"]
                     screenshot = telegram_from_robot["Screenshot"]
-                    DEF_RIst = telegram_from_robot['DEF_RIst']
+                    RIst = telegram_from_robot['RIst']
                     ipoc = telegram_from_robot["IPOC"]
                     
                 except Exception as ex:
@@ -60,7 +61,8 @@ def routine_for_camera(server_address, port, mess_input, mess_output):
             # # clientMsg = "Message from { } : {}".format(received_address, ReceivedMessage)
             # clientIP = "Client IP Address:{}".format(received_address)
             # # print(clientMsg)
-            # # print(clientIP)    
+            # # print(clientIP)   
+            print('received from camera', ReceivedMessage) 
             received_dict = extract_xml(ReceivedMessage)
 
 
@@ -81,11 +83,12 @@ def routine_for_camera(server_address, port, mess_input, mess_output):
             sent_mess_list.append({'Position_reached': position_reached})
             sent_mess_list.append({'Need_cam_cal': need_cam_cal})
             sent_mess_list.append({'Screenshot': screenshot})     
-            sent_mess_list.append({'DEF_RIst': DEF_RIst})   
+            sent_mess_list.append({'RIst': RIst})   
             #creating a new telegram to send
             # telegram = create_xml(sent_mess_list)    
             telegram = create_xml_fast(sent_mess_list)
-            # print(telegram)    
+            #print("Server sends to camera client:", telegram) 
+            #print()   
             SendData(telegram, conn, received_address)
             
 
@@ -151,7 +154,8 @@ def routine_for_robot(server_address, port, mess_input, mess_output):
             received_address = bytesAddressPair[1]
             # clientMsg = "Message from { } : {}".format(received_address, ReceivedMessage)
             # clientIP = "Client IP Address:{}".format(received_address)
-            # print('received from robot', ReceivedMessage)
+            #print('received from robot', ReceivedMessage)
+            #print()
             # print(clientIP)    
             received_dict = extract_xml(ReceivedMessage)
 
@@ -186,7 +190,8 @@ def routine_for_robot(server_address, port, mess_input, mess_output):
             #creating a new telegram to send
             # telegram = create_xml(sent_mess_list)
             telegram = create_xml_fast(sent_mess_list)
-            # print('to send to robot', telegram)    
+            print('to send to robot', telegram)  
+            print()  
             SendData(telegram, conn, received_address)
 
             time.sleep(0.001)

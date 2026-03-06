@@ -12,7 +12,7 @@ from lib_config_loader import load_config
 
 import tensorflow as tf
 import datetime
-from utils import label_map_util
+#from utils import label_map_util
 
 import json
 from ifm3dpy.device import O3D
@@ -22,10 +22,12 @@ import copy, socket
 
 import cv2                #  assumed – for AprilTag detection
 import numpy as np
-from ifm3dpy.pcic import FrameGrabber, buffer_id
+from ifm3dpy.framegrabber import FrameGrabber, buffer_id
 import subprocess, logging
 from typing import Tuple
 from calib_routine import optimize 
+
+from queue import Queue, Empty
 
 
 tf.get_logger().setLevel('ERROR')           # Suppress TensorFlow logging (2)
@@ -66,6 +68,7 @@ class CameraManager:
         self.detect_fn = self.model.signatures['serving_default']
 
     def calib_procedure(self):
+        print('Calibration subroutine started')
 
         ################################################ 
         # # what to expect in received_dict from robot
@@ -130,6 +133,10 @@ class CameraManager:
             self.send_robot({"Cam_cal_in_proc": '0'})       # robot <-- camera_manager
             
             ################################################
+        except Exception as e:
+            print(f"[Client] Calibration has fallen down: {e}")
+               
+            
             
             self.set_inference_settings()
         finally:                
@@ -161,7 +168,7 @@ class CameraManager:
         """Return a **deep copy** of the current config so the caller can’t modify it in place."""
         return copy.deepcopy(self._config)
 
-    def save_config_to_file(self, path: str | Path | None = None) -> None:
+    def save_config_to_file(self, path = None) -> None:
         """Persist the working configuration to disk."""
         path = Path(path or self._config_path)
         with open(path, "w", encoding="utf‑8") as f:
@@ -207,7 +214,7 @@ class CameraManager:
         self._config = self._load_config_file(cfg_path)
         self._push_config()
 
-        wait_camera_online(self.cfg["SENSOR_IP"])  # await for camera alive again
+        self.wait_camera_online(self.cfg["SENSOR_IP"])  # await for camera alive again
         self.mode = "calibration"   # inference / calibration
         self.state = "free"
         print("Calibration settings applied.")
@@ -220,10 +227,10 @@ class CameraManager:
         assert cfg_path.is_file(), f"Inference file not found: {cfg_path}"
     
         self._config_path = cfg_path                   
-        self._config = self._load_config_file(cfg_path)
+        self._config = self._load_config_file(self.cfg['config_path_work_inference_setting'])
         self._push_config()
 
-        wait_camera_online(self.cfg["SENSOR_IP"])  # await for camera alive again
+        self.wait_camera_online(self.cfg["SENSOR_IP"])  # await for camera alive again
         self.mode = "inference"   # inference / calibration
         self.state = "free"
         print("Inference settings applied.")
@@ -251,7 +258,7 @@ class CameraManager:
             time.sleep(interval)
 
 
-    def wait_robot(self, field: str, desired_value : bool, timeout: float | None = None):
+    def wait_robot(self, field, desired_value , timeout= None):
         """field = 'Position_reached'  – safely extract specific sig from robot telegram in background process"""
         end = time.time() + timeout if timeout else None
         while True:
@@ -274,7 +281,7 @@ class CameraManager:
         self,
         *,
         save_raw: bool = False,
-        root_dir: Path = Path(self.cfg["root_dir"]),
+        root_dir: Path = None,
         timeout_ms: int = 100,
     ) -> Tuple[np.ndarray, float]:
         """
@@ -301,6 +308,8 @@ class CameraManager:
         RuntimeError
             When the camera is unreachable or no AprilTag is detected.
         """
+        if root_dir is None:
+            root_dir = Path(self.cfg["root_dir"])
     
         loop = asyncio.get_running_loop()
     
@@ -435,6 +444,7 @@ async def main():
     thread = None
 
     cfg_future: asyncio.Future | None = None     # перед while True # background process handler
+    print('Started loop in camera client...')
     while True:
         ################################################
         # SENDING MESSAGES TO CAMERA SERVER-SUBPROCESS
@@ -448,6 +458,7 @@ async def main():
         ################################################
         # RECEIVING MESSAGES FROM CAMERA SERVER-SUBPROCESS
         ################################################ 
+        print('Await for message')
         bytesAddressPair = UDPClientSocket.recvfrom(4096)
 
         # ----------  put robot telegram into calibration stream ------------
@@ -462,13 +473,20 @@ async def main():
         #print(clientMsg)
         #print(clientIP)
         received_dict = extract_xml(ReceivedMessage)
-        ##print('camera_received_telegram', ReceivedMessage)
+        print('camera_received_telegram', ReceivedMessage)
 
         # use received data from cam
         try:
             watchDog_out = received_dict['WatchDog_out']
         except Exception as ex:
-            print(f" Data can not be extracted from received to camera telegram: {ex}")   
+            print(f" WatchDog_out Data can not be extracted from received to camera telegram: {ex}")   
+            
+        try:
+            need_cam_cal = received_dict['Need_cam_cal']
+        except Exception as ex:
+            need_cam_cal = 0
+            print(f" need_cam_cal forced to zero: {ex}")       
+            
 
         ################################################
         # MAIN OPERATION LOGIC
@@ -476,7 +494,9 @@ async def main():
         # RUN HEAVY TASK IN BACKGROUND MODE
 
         # --- Start a background switch --------------------------------
-        if received_dict['need_cam_cal'] == "1" and cm.mode == "inference" and cm.state == "free" and cfg_future is None:
+        #print(f"Calib_request: {received_dict['Need_cam_cal']}, camera_mode: {cm.mode}, camera_state: {cm.state}, cfg_future: {cfg_future}")
+        if int(float(need_cam_cal)) == 1 and cm.mode == "inference" and cm.state == "free" and cfg_future is None:
+            print('Calibration started')
             cfg_future = loop.run_in_executor(None, cm.calib_procedure)
             logging.info("Started calibration")
 
@@ -491,7 +511,8 @@ async def main():
                 cfg_future = None            # ready for the next request
 
 
-        if received_dict['need_cam_cal'] == "0" and cm.mode == "inference" and cm.state == "free":
+        if need_cam_cal == "0" and cm.mode == "inference" and cm.state == "free":
+            pass
             # DO INFERENCE. SYNC or ASYNC
 
         ################################################
@@ -524,13 +545,18 @@ async def main():
         }
         
         # ----------  apply signals from calibration stream ------------
-        if cfg_future and not cfg_future.done(): # only when calibration
-            while True:
-                try:
-                    patch = tx_queue.get_nowait()     # patch: dict[str, Any]
-                except Empty:
-                    break
-                msg.update(patch)                     
+        if cm.mode == "calibration":
+            print(f'Applying signals from calibration stream: cfg_future: {cfg_future}')
+            print(f'Applying signals from calibration stream: cfg_future.done(): {cfg_future.done()}')
+            if cfg_future is not None and not cfg_future.done(): # only when calibration
+                print('something')
+                while True:
+                    try:
+                        patch = cm._tx_q.get_nowait()
+                        print(f'Updating patch: {patch}')
+                        msg.update(patch)
+                    except Empty:
+                        break                   
         
         # ----------  convert into needed format --------------------------
         sent_mess_list = [{k: v} for k, v in msg.items()]
@@ -539,7 +565,9 @@ async def main():
         
                 
         #display.clear_output(wait=True)
+        print('!')
         await asyncio.sleep(0.001) # DO NOT CHANGE
+        print('!')
 
 
     

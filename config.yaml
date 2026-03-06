@@ -1,27 +1,27 @@
 server:
   robot_port: 59152
   camera_port: 59153
-  address: "127.0.0.1"
+  address: "192.168.178.25"
 
 clients:
   robot:
     target_port: 59152
-    target_address: "127.0.0.1"
+    target_address: "192.168.178.21"
   camera:
     target_port: 59153
-    target_address: "127.0.0.1"
+    target_address: "192.168.178.25" # "192.168.178.25"
 
 
 camera_manager:
   LABEL_FILENAME : 'teat_label_map.pbtxt'
   PATH_TO_LABELS : './teat_label_map.pbtxt' #download_labels(LABEL_FILENAME) 
-  PATH_TO_SAVED_MODEL : '/home/oem/obj_det/teat_inference_graph6/saved_model'
+  PATH_TO_SAVED_MODEL : './model/'
   
-  SENSOR_IP : "192.168.178.69"
+  SENSOR_IP : "192.168.178.201"
   xmlrpc-port : 50010
   index : 0
-  config_path_calibration_setting : "sample_config.json"
-  config_path_work_inference_setting : "sample_config.json"
-  root_dir : "/mnt/tagmii1"
+  config_path_calibration_setting : "./to_import/cal_high_res.json"
+  config_path_work_inference_setting : "./to_import/detect_auto.json"
+  root_dir : "./root_dir"
   num_calib_positions : 20
 
