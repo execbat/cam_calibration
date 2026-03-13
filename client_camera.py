@@ -1,3 +1,4 @@
+import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
@@ -26,6 +27,9 @@ from lib_connection import *
 from lib_robot_transformations import *
 from lib_config_loader import load_config
 from calib_routine import optimize
+
+from argparse import ArgumentParser
+from apriltag.scripts import apriltag
 
 
 tf.get_logger().setLevel("ERROR")
@@ -341,9 +345,98 @@ class CameraManager:
 
             return ((arr - mn) * 255.0 / (mx - mn)).astype(np.uint8)
 
-        def _detect_apriltag(amp_u8: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-            raise RuntimeError("AprilTag detector is not implemented")
-
+        def _detect_apriltag():
+            #parser = ArgumentParser(description='Detect AprilTags from static images.')
+            #apriltag.add_arguments(parser)
+            #options = parser.parse_args()
+        
+            detector = apriltag.Detector(searchpath=apriltag._get_dll_path())
+            start_time = time.time()
+            [ok, frame]=fg.wait_for_frame().wait_for(5)
+            if ok:
+                print("OK!!", frame.timestamps())
+    #        while not  :
+    #            continue
+            if not ok:
+                return 0.0
+                #raise RuntimeError("Timeout while waiting for a frame.")
+            #frame1 = getter(buf)
+            #NORM_AMPLITUDE_IMAGE, buffer_id.RADIAL_DISTANCE_IMAGE, buffer_id.XYZ]  )
+            a=frame.get_buffer(buffer_id.NORM_AMPLITUDE_IMAGE)
+            rows = a.shape[1]
+            cols = a.shape[0]
+            print(rows)
+            print(cols)
+            print(a.max()) 
+            
+            for x in range(0, cols - 1):
+                for y in range(0, rows -1):
+                    #print(a[x,y])
+                    pixel_value=a[x,y]
+                    if pixel_value>=3000:
+                        a[x,y]=3000
+                      #  print(pixel_value)
+                    if x>=245:
+                        a[x,y]=0
+            print(a.max())     
+            frame1=cv2.normalize(a, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+            
+            #frame1=np.uint8(frame.get_buffer(buffer_id.NORM_AMPLITUDE_IMAGE))
+           # frame1=frame.get_buffer(buffer_id.NORM_AMPLITUDE_IMAGE)
+            frame2=np.uint8(frame.get_buffer(buffer_id.RADIAL_DISTANCE_IMAGE))
+            frame3=np.uint8(frame.get_buffer(buffer_id.CONFIDENCE_IMAGE))
+    #        frame1=frame.get_buffer(buffer_id.NORM_AMPLITUDE_IMAGE)
+    #        frame2=frame.get_buffer(buffer_id.RADIAL_DISTANCE_IMAGE)
+    #        frame3=frame.get_buffer(buffer_id.CONFIDENCE_IMAGE)
+            pt=frame.get_buffer(buffer_id.XYZ)
+            result, overlay = apriltag.detect_tags(frame1,
+                                                       detector,
+                                                       camera_params=(3156.71852, 3129.52243, 359.097908, 239.736909),
+                                                       tag_size=0.2,
+                                                       vizualization=3,
+                                                       verbose=0,
+                                                       annotation=1.0
+                                                      )
+            got_tag=0.0
+            if (len(result)>0):
+                    if(result):
+                        #print("got result")
+                        #key = cv2.waitKey(20000)
+                                
+                       # pt=buf.xyz_image()
+                        center=result[0].center
+            
+            print(f"result {result}")            
+            if result[0].center[0]==0 or result[0].corners[0][0]==0 or result[0].corners[1][0]==0 or result[0].corners[2][0]==0 or result[0].corners[3][0]==0:                
+                return 0.0
+            sumx=0
+            sumy=0 
+            sumz=0  
+            crnrs=0   
+            for corner in result[0].corners:
+                    
+                        x=pt[int(corner[1]), int(corner[0])][0]
+                        y=pt[int(corner[1]), int(corner[0])][1]
+                        z=pt[int(corner[1]), int(corner[0])][2]
+                        print(pt[int(corner[1]), int(corner[0])], file = sourceFile)
+                        print(pt[int(corner[1]), int(corner[0])])
+                        if (x!=0 or y!=0 or z!=0):
+                            sumx+=x
+                            sumy+=y
+                            sumz+=z
+                            crnrs=crnrs+1
+                        else:
+                            
+                            
+                            return 0.0
+            if crnrs==4:           
+                centroid = (sumx / 4, sumy / 4, sumz/4)
+                print("calculated center")
+                print(centroid)
+            got_tag=1.0
+            return centroid
+            
+        ####
         fg = None
         ok = False
         frame = None
@@ -374,14 +467,14 @@ class CameraManager:
 
             #ts_epoch = frame.timestamps().image_time_ms / 1e9
 
-            buf_amp = frame.get_buffer(buffer_id.AMPLITUDE_IMAGE)
+            #buf_amp = frame.get_buffer(buffer_id.AMPLITUDE_IMAGE)
             buf_dist = frame.get_buffer(buffer_id.RADIAL_DISTANCE_IMAGE)
             buf_conf = frame.get_buffer(buffer_id.CONFIDENCE_IMAGE)
             buf_xyz = frame.get_buffer(buffer_id.XYZ)
 
-            amp_u8 = _normalize_amplitude(buf_amp)
+            #amp_u8 = _normalize_amplitude(buf_amp)
 
-            corners_px, T_cam_tag = _detect_apriltag(amp_u8)
+            T_cam_tag = _detect_apriltag()
 
             if T_cam_tag is None:
                 raise RuntimeError("AprilTag detector returned no transform")
