@@ -18,7 +18,7 @@ camera_manager:
   PATH_TO_SAVED_MODEL : './model/'
   
   SENSOR_IP : "192.168.178.201"
-  xmlrpc-port : 50010
+  xmlrpc_port : 50010
   index : 0
   config_path_calibration_setting : "./to_import/cal_high_res.json"
   config_path_work_inference_setting : "./to_import/detect_auto.json"

@@ -62,7 +62,7 @@ def routine_for_camera(server_address, port, mess_input, mess_output):
             # clientIP = "Client IP Address:{}".format(received_address)
             # # print(clientMsg)
             # # print(clientIP)   
-            print('received from camera', ReceivedMessage) 
+            #print('received from camera', ReceivedMessage) 
             received_dict = extract_xml(ReceivedMessage)
 
 
@@ -87,7 +87,7 @@ def routine_for_camera(server_address, port, mess_input, mess_output):
             #creating a new telegram to send
             # telegram = create_xml(sent_mess_list)    
             telegram = create_xml_fast(sent_mess_list)
-            #print("Server sends to camera client:", telegram) 
+            print("Server sends to camera client:", telegram) 
             #print()   
             SendData(telegram, conn, received_address)
             
@@ -191,7 +191,7 @@ def routine_for_robot(server_address, port, mess_input, mess_output):
             # telegram = create_xml(sent_mess_list)
             telegram = create_xml_fast(sent_mess_list)
             print('to send to robot', telegram)  
-            print()  
+            #print()  
             SendData(telegram, conn, received_address)
 
             time.sleep(0.001)
