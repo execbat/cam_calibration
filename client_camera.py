@@ -124,11 +124,17 @@ class CameraManager:
                 ])
                 print("saved robot position")
 
-                T, timetag = self.capture_apriltag_transform()
-                cam_frames_list.append(
-                    Rotation_matrix(T, "KUKA").extract_frame().to_list()
-                )
-                print('Saved camera detection')
+                T = self.capture_apriltag_transform()
+                if T is None:
+                    rob_frames_list.pop() # remove last robot position
+                    print('popped last robot pose due to no camera detecions')
+                else:    
+                    cam_frames_list.append(
+                        Rotation_matrix(T, "KUKA").extract_frame().to_list()
+                    )
+                    print('Saved camera detection')
+                
+                assert len(rob_frames_list) == len(cam_frames_list), "Collected robot positions as not equal to collected camera detections"
 
             result_dict = optimize(cam_frames_list, rob_frames_list)
 
@@ -174,10 +180,12 @@ class CameraManager:
             return json.load(f)
 
     def _push_config(self) -> None:
-        self.o3d.from_json(self._config)
+        pass
+        #self.o3d.from_json(self._config)
 
     def _pull_config(self) -> None:
-        self._config = self.o3d.to_json()
+        pass
+        #self._config = self.o3d.to_json()
 
     def get_config(self) -> dict:
         return copy.deepcopy(self._config)
@@ -209,10 +217,18 @@ class CameraManager:
         assert cfg_path.is_file(), f"Calibration file not found: {cfg_path}"
 
         self._config_path = cfg_path
-        self._config = self._load_config_file(cfg_path)
+        self._config = self._load_config_file(self._config_path)
+
+        # новое соединение перед push
+        self.o3d = O3D(ip=self.cfg["SENSOR_IP"])
         self._push_config()
 
         self.wait_camera_online(self.cfg["SENSOR_IP"])
+        time.sleep(2.0)
+
+        # после reboot/reconnect лучше создать новый O3D ещё раз
+        self.o3d = O3D(ip=self.cfg["SENSOR_IP"])
+
         self.mode = "calibration"
         self.state = "free"
         print("Calibration settings applied.")
@@ -224,10 +240,16 @@ class CameraManager:
         assert cfg_path.is_file(), f"Inference file not found: {cfg_path}"
 
         self._config_path = cfg_path
-        self._config = self._load_config_file(cfg_path)
+        self._config = self._load_config_file(self._config_path)
+
+        self.o3d = O3D(ip=self.cfg["SENSOR_IP"])
         self._push_config()
 
         self.wait_camera_online(self.cfg["SENSOR_IP"])
+        time.sleep(2.0)
+
+        self.o3d = O3D(ip=self.cfg["SENSOR_IP"])
+
         self.mode = "inference"
         self.state = "free"
         print("Inference settings applied.")
@@ -311,199 +333,96 @@ class CameraManager:
         root_dir: Path = None,
         timeout_ms: int = 300,
         retry_count: int = 10,
-    ) -> Tuple[np.ndarray, float]:
+    ) -> np.ndarray:
         if root_dir is None:
             root_dir = Path(self.cfg["root_dir"])
-
-        def _ping(ip: str, tries: int = 1) -> bool:
-            cmd = ["ping", "-c", str(tries), "-W", "1", ip]
-            return subprocess.call(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            ) == 0
 
         def _open_fg() -> FrameGrabber:
             fg = FrameGrabber(self.o3d, pcic_port=self.cfg["xmlrpc_port"])
             fg.start([
-                buffer_id.AMPLITUDE_IMAGE,
+                buffer_id.NORM_AMPLITUDE_IMAGE,
                 buffer_id.RADIAL_DISTANCE_IMAGE,
                 buffer_id.CONFIDENCE_IMAGE,
                 buffer_id.XYZ,
             ])
             return fg
 
-        def _normalize_amplitude(buf: np.ndarray) -> np.ndarray:
-            arr = buf.copy()
-            arr[arr >= 16200] = 0
-            arr[:, 215:] = 0
-
-            mn = arr.min()
-            mx = arr.max()
-            if mx <= mn:
-                return np.zeros_like(arr, dtype=np.uint8)
-
-            return ((arr - mn) * 255.0 / (mx - mn)).astype(np.uint8)
-
-        def _detect_apriltag():
-            #parser = ArgumentParser(description='Detect AprilTags from static images.')
-            #apriltag.add_arguments(parser)
-            #options = parser.parse_args()
-        
-            detector = apriltag.Detector(searchpath=apriltag._get_dll_path())
-            start_time = time.time()
-            [ok, frame]=fg.wait_for_frame().wait_for(5)
-            if ok:
-                print("OK!!", frame.timestamps())
-    #        while not  :
-    #            continue
-            if not ok:
-                return 0.0
-                #raise RuntimeError("Timeout while waiting for a frame.")
-            #frame1 = getter(buf)
-            #NORM_AMPLITUDE_IMAGE, buffer_id.RADIAL_DISTANCE_IMAGE, buffer_id.XYZ]  )
-            a=frame.get_buffer(buffer_id.NORM_AMPLITUDE_IMAGE)
-            rows = a.shape[1]
-            cols = a.shape[0]
-            print(rows)
-            print(cols)
-            print(a.max()) 
-            
-            for x in range(0, cols - 1):
-                for y in range(0, rows -1):
-                    #print(a[x,y])
-                    pixel_value=a[x,y]
-                    if pixel_value>=3000:
-                        a[x,y]=3000
-                      #  print(pixel_value)
-                    if x>=245:
-                        a[x,y]=0
-            print(a.max())     
-            frame1=cv2.normalize(a, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
-            
-            #frame1=np.uint8(frame.get_buffer(buffer_id.NORM_AMPLITUDE_IMAGE))
-           # frame1=frame.get_buffer(buffer_id.NORM_AMPLITUDE_IMAGE)
-            frame2=np.uint8(frame.get_buffer(buffer_id.RADIAL_DISTANCE_IMAGE))
-            frame3=np.uint8(frame.get_buffer(buffer_id.CONFIDENCE_IMAGE))
-    #        frame1=frame.get_buffer(buffer_id.NORM_AMPLITUDE_IMAGE)
-    #        frame2=frame.get_buffer(buffer_id.RADIAL_DISTANCE_IMAGE)
-    #        frame3=frame.get_buffer(buffer_id.CONFIDENCE_IMAGE)
-            pt=frame.get_buffer(buffer_id.XYZ)
-            result, overlay = apriltag.detect_tags(frame1,
-                                                       detector,
-                                                       camera_params=(3156.71852, 3129.52243, 359.097908, 239.736909),
-                                                       tag_size=0.2,
-                                                       vizualization=3,
-                                                       verbose=0,
-                                                       annotation=1.0
-                                                      )
-            got_tag=0.0
-            if (len(result)>0):
-                    if(result):
-                        #print("got result")
-                        #key = cv2.waitKey(20000)
-                                
-                       # pt=buf.xyz_image()
-                        center=result[0].center
-            
-            print(f"result {result}")            
-            if result[0].center[0]==0 or result[0].corners[0][0]==0 or result[0].corners[1][0]==0 or result[0].corners[2][0]==0 or result[0].corners[3][0]==0:                
-                return 0.0
-            sumx=0
-            sumy=0 
-            sumz=0  
-            crnrs=0   
-            for corner in result[0].corners:
-                    
-                        x=pt[int(corner[1]), int(corner[0])][0]
-                        y=pt[int(corner[1]), int(corner[0])][1]
-                        z=pt[int(corner[1]), int(corner[0])][2]
-                        print(pt[int(corner[1]), int(corner[0])], file = sourceFile)
-                        print(pt[int(corner[1]), int(corner[0])])
-                        if (x!=0 or y!=0 or z!=0):
-                            sumx+=x
-                            sumy+=y
-                            sumz+=z
-                            crnrs=crnrs+1
-                        else:
-                            
-                            
-                            return 0.0
-            if crnrs==4:           
-                centroid = (sumx / 4, sumy / 4, sumz/4)
-                print("calculated center")
-                print(centroid)
-            got_tag=1.0
-            return centroid
-            
-        ####
+        detector = apriltag.Detector(searchpath=apriltag._get_dll_path())
+    
         fg = None
-        ok = False
-        frame = None
-
         try:
             fg = _open_fg()
-
+    
             for attempt in range(retry_count):
                 try:
-                    fg.sw_trigger()
+                    #fg.sw_trigger()
                     ok, frame = fg.wait_for_frame().wait_for(timeout_ms)
                 except Exception as exc:
-                    logging.warning("Frame grabber error on attempt %d: %s", attempt + 1, exc)
-                    ok = False
-                    frame = None
+                    print(f"[Camera] Frame error on attempt {attempt + 1}: {exc}")
+                    ok, frame = False, None
 
-                if ok and frame is not None:
-                    break
+                if not ok or frame is None:
+                    time.sleep(0.1)
+                    continue
 
-                ip = self.cfg["SENSOR_IP"]
-                if not _ping(ip):
-                    raise RuntimeError(f"Camera {ip} is unreachable (ping failed)")
+                amp = frame.get_buffer(buffer_id.NORM_AMPLITUDE_IMAGE).copy()
+                pt = frame.get_buffer(buffer_id.XYZ)
 
-                time.sleep(0.1)
+                rows = amp.shape[1]
+                cols = amp.shape[0]
 
-            if not ok or frame is None:
-                raise RuntimeError("Timeout while waiting for a frame")
+                amp = amp.copy()
+                amp[amp >= 3000] = 3000
+                if cols > 245:
+                    amp[245:, :] = 0
 
-            #ts_epoch = frame.timestamps().image_time_ms / 1e9
+                frame1 = cv2.normalize(amp, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
 
-            #buf_amp = frame.get_buffer(buffer_id.AMPLITUDE_IMAGE)
-            buf_dist = frame.get_buffer(buffer_id.RADIAL_DISTANCE_IMAGE)
-            buf_conf = frame.get_buffer(buffer_id.CONFIDENCE_IMAGE)
-            buf_xyz = frame.get_buffer(buffer_id.XYZ)
+                result, overlay = apriltag.detect_tags(
+                    frame1,
+                    detector,
+                    camera_params=(3156.71852, 3129.52243, 359.097908, 239.736909),
+                    tag_size=0.2,
+                    vizualization=3,
+                    verbose=0,
+                    annotation=1.0,
+                )
 
-            #amp_u8 = _normalize_amplitude(buf_amp)
+                if result is not None and len(result) >= 2:
 
-            T_cam_tag = _detect_apriltag()
 
-            if T_cam_tag is None:
-                raise RuntimeError("AprilTag detector returned no transform")
+                    tag = result[0]
+                    T_mtx = result[1]
 
-            T_cam_tag = np.asarray(T_cam_tag, dtype=np.float64)
-            if T_cam_tag.shape != (4, 4):
-                raise RuntimeError(f"Invalid transform shape: expected (4, 4), got {T_cam_tag.shape}")
+                    sumx = 0.0
+                    sumy = 0.0
+                    sumz = 0.0
+                    crnrs = 0
 
-            if save_raw:
-                now = datetime.datetime.now()
-                day_dir = root_dir / now.strftime("%Y_%m_%d") / now.strftime("%p")
-                day_dir.mkdir(parents=True, exist_ok=True)
+                    for corner in tag.corners:
+                        x = pt[int(corner[1]), int(corner[0])][0]
+                        y = pt[int(corner[1]), int(corner[0])][1]
+                        z = pt[int(corner[1]), int(corner[0])][2]
+                        if x != 0 or y != 0 or z != 0:
+                            sumx += x
+                            sumy += y
+                            sumz += z
+                            crnrs += 1
 
-                existing_indices = []
-                for p in day_dir.iterdir():
-                    if p.is_dir() and p.name.isdigit():
-                        existing_indices.append(int(p.name))
+                    if crnrs == 4:
+                        centroid = (sumx / 4.0, sumy / 4.0, sumz / 4.0)
+                        T_mtx[:3, -1] = centroid
+    
+                        T_cam_tag = np.asarray(T_mtx, dtype=np.float64)
+                        if T_cam_tag.shape != (4, 4):
+                            raise RuntimeError(f"Invalid transform shape: {T_cam_tag.shape}")
 
-                next_index = (max(existing_indices) + 1) if existing_indices else 1
-                dump_dir = day_dir / f"{next_index:04d}"
-                dump_dir.mkdir(parents=True, exist_ok=True)
+                        print(f"Detected matrix: {T_cam_tag}")
+                        return T_cam_tag
 
-                base_name = now.strftime("%Y_%m_%d_%H_%M_%S")
-                np.save(str(dump_dir / f"{base_name}_xyz.npy"), buf_xyz)
-                cv2.imwrite(str(dump_dir / f"{base_name}_amp.png"), amp_u8)
-                cv2.imwrite(str(dump_dir / f"{base_name}_dist.png"), buf_dist)
-                cv2.imwrite(str(dump_dir / f"{base_name}_conf.png"), buf_conf)
+                time.sleep(0.05)
 
-            return T_cam_tag #, ts_epoch
+            return None
 
         finally:
             if fg is not None:
@@ -511,6 +430,7 @@ class CameraManager:
                     fg.stop()
                 except Exception:
                     pass
+                    
 
 
 def apply_pending_tx_patches(tx_queue: Queue, msg: dict) -> None:
