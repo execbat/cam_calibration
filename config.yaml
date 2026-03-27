@@ -20,8 +20,8 @@ camera_manager:
   SENSOR_IP : "192.168.178.201"
   xmlrpc_port : 50010
   index : 0
-  config_path_calibration_setting : "./to_import/cal_high_res.json"
-  config_path_work_inference_setting : "./to_import/detect_auto.json"
+  config_path_calibration_setting : "./to_import/calibration_settings.json"
+  config_path_work_inference_setting : "./to_import/inference_settings.json"
   root_dir : "./root_dir"
-  num_calib_positions : 20
+  num_calib_positions : 4
 

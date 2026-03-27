@@ -133,7 +133,7 @@ def loss(A_batch, B_batch, x_mtx):
 
     return loss_transl
 
-def train_step(x_mtx, loss_func, A_batch, B_batch):
+def train_step(x_mtx, loss_func, A_batch, B_batch, opt):
     """
     Optimization step implemented without .fit()
 
@@ -147,7 +147,7 @@ def train_step(x_mtx, loss_func, A_batch, B_batch):
     ###################################################
     return loss.numpy()
     
-def train(x_mtx, loss_func, dataset, num_epochs = 1000):
+def train(x_mtx, loss_func, dataset, opt, num_epochs = 1000):
     # init the iterators of DATASETs
     loss_history = list()
     x_fr_history = np.array([0,0,0,0,0,0])
@@ -159,18 +159,18 @@ def train(x_mtx, loss_func, dataset, num_epochs = 1000):
         for batch in dataset:   
             A_batch = batch[:, :, :4]
             B_batch = batch[:, :, 4:]
-            loss_value = train_step(x_mtx, loss_func, A_batch, B_batch)
+            loss_value = train_step(x_mtx, loss_func, A_batch, B_batch, opt)
             
             
         loss_history.append(loss_value)
         x_fr_history = np.vstack( (x_fr_history, x_mtx_2_kuka_frame(copy.deepcopy(x_mtx)))) # add postprocessed x_mtx to history
 
         if epoch % 2 == 0:
-            display.clear_output(wait=True)
+            #display.clear_output(wait=True)
             print('Epoch {}: loss: {}'.format(epoch, loss_value))
             print(x_mtx.numpy())
-            plt.plot(loss_history)
-            plt.show()
+            #plt.plot(loss_history)
+            #plt.show()
 
         if loss_value < 0.0001:
             break
@@ -207,11 +207,11 @@ def optimize(cam_frames_list, rob_frames_list):
     opt = tf.keras.optimizers.Adam(learning_rate=lr_schedule, amsgrad = True) # learning_rate=0.5, amsgrad = True
 
     # START TRAIN PROCESS 
-    result_kuka_frame, loss_history, x_fr_history = train(x_mtx, loss, dataset_joined, num_epochs= 1000)
+    result_kuka_frame, loss_history, x_fr_history = train(x_mtx, loss, dataset_joined, opt, num_epochs= 1000)
 
     # convert result into dict format
     result_dict = dict()
-    for k, v in zip(['X','Y','Z','A','B','C'], result_kuka_frame.to_list()):
+    for k, v in zip(['X','Y','Z','A','B','C'], result_kuka_frame.tolist()):
         result_dict[k] = str(v)
 
     return result_dict

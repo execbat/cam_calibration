@@ -1,6 +1,7 @@
 import os
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import threading
 
 import time
 import json
@@ -31,6 +32,9 @@ from calib_routine import optimize
 from argparse import ArgumentParser
 from apriltag.scripts import apriltag
 
+from tensorflow.python.ops.numpy_ops import np_config
+np_config.enable_numpy_behavior()
+
 
 tf.get_logger().setLevel("ERROR")
 
@@ -55,8 +59,20 @@ class CameraManager:
         self.o3d = O3D(ip=self.cfg["SENSOR_IP"])
         self._config_path = None
         self._config = None
+        
+        self._stop_inference = threading.Event()
+        self._inference_running = threading.Event()
 
         self.set_inference_settings()
+        
+    def request_stop_inference(self):
+        self._stop_inference.set()
+
+    def clear_stop_inference(self):
+        self._stop_inference.clear()
+
+    def should_stop_inference(self):
+        return self._stop_inference.is_set()    
 
     def get_state(self):
         return self.state
@@ -64,6 +80,20 @@ class CameraManager:
     def load_model(self):
         self.model = tf.saved_model.load(self.cfg["PATH_TO_SAVED_MODEL"])
         self.detect_fn = self.model.signatures["serving_default"]
+        
+    def inference_procedure(self):
+        self.state = "busy"
+        self.mode = "inference"
+        self.clear_stop_inference()
+        self._inference_running.set()
+
+        try:
+            self.capture_target_xyz1()
+        finally:
+            self._inference_running.clear()
+            if self.mode == "inference":
+                self.state = "free"
+            
 
     def calib_procedure(self):
         print("Calibration subroutine started")
@@ -180,12 +210,12 @@ class CameraManager:
             return json.load(f)
 
     def _push_config(self) -> None:
-        pass
-        #self.o3d.from_json(self._config)
+        #pass
+        self.o3d.from_json(self._config)
 
     def _pull_config(self) -> None:
-        pass
-        #self._config = self.o3d.to_json()
+        #pass
+        self._config = self.o3d.to_json()
 
     def get_config(self) -> dict:
         return copy.deepcopy(self._config)
@@ -217,6 +247,7 @@ class CameraManager:
         assert cfg_path.is_file(), f"Calibration file not found: {cfg_path}"
 
         self._config_path = cfg_path
+        print(f'Loading camera calibration settings by path: {self._config_path}')
         self._config = self._load_config_file(self._config_path)
 
         # новое соединение перед push
@@ -240,6 +271,7 @@ class CameraManager:
         assert cfg_path.is_file(), f"Inference file not found: {cfg_path}"
 
         self._config_path = cfg_path
+        print(f'Loading camera inference settings by path: {self._config_path}')
         self._config = self._load_config_file(self._config_path)
 
         self.o3d = O3D(ip=self.cfg["SENSOR_IP"])
@@ -326,6 +358,301 @@ class CameraManager:
     def send_robot(self, patch: dict):
         self._tx_q.put(patch)
 
+
+      
+    def capture_target_xyz1(
+        self,
+        *,
+        save_raw: bool = False,
+        root_dir: Path = None,
+        timeout_ms: int = 300,
+        retry_count: int = 10,
+    ) -> np.ndarray:
+        if root_dir is None:
+            root_dir = Path(self.cfg["root_dir"])
+            
+        def live_image_into_numpy_array(frame1, frame2, frame3):
+            """Load an image from file into a numpy array.
+
+            Puts image into numpy array to feed into tensorflow graph.
+            Note that by convention we put it into a numpy array with shape
+            (height, width, channels), where channels=3 for RGB.
+
+            Args:
+              path: the file path to the image
+
+            Returns:
+              uint8 numpy array with shape (img_height, img_width, 3)
+            """
+                        
+            out = np.uint8(np.dstack([frame1, frame2, frame3]))
+            return out    
+
+        def _open_fg() -> FrameGrabber:
+            fg = FrameGrabber(self.o3d, pcic_port=self.cfg["xmlrpc_port"])
+            fg.start([
+                buffer_id.AMPLITUDE_IMAGE,
+                buffer_id.RADIAL_DISTANCE_IMAGE,
+                buffer_id.CONFIDENCE_IMAGE,
+                buffer_id.XYZ,
+            ])
+            return fg
+            
+        def process_teats(far_points, pt, traverse_points, max_age, traverse_points_age):
+            cam_pos = []
+            teat_cntr = 0
+            teats = np.zeros((4, 3))
+
+            if True:
+                far_points = sorted(far_points, key=lambda x: x[0], reverse=True)
+                far_points_history = far_points
+
+                for i in range(len(far_points)):
+                    far_point = tuple(far_points[i])
+        
+                    if np.any(far_points[i]):
+                        for j in range(len(traverse_points)):
+                            traverse_point = tuple(traverse_points[j])
+                    
+                            for k in range(len(traverse_points)):
+                                if j == k:
+                                    break
+
+                                if (
+                                    np.allclose(
+                                        traverse_points_age[k],
+                                        traverse_points_age[j],
+                                        rtol=0.1,
+                                        atol=0.1,
+                                        equal_nan=False,
+                                    )
+                                    or traverse_points_age[k] > max_age
+                                ):
+                                    traverse_points[k] = (0, 0)
+                                    traverse_points_age[k] = 0
+                                    print("delete old tp")
+
+                            if np.allclose(
+                                far_point,
+                                traverse_point,
+                                rtol=0.1,
+                                atol=0.1,
+                                equal_nan=False,
+                            ):
+                                traverse_points[j] = far_point
+                                traverse_points_age[j] = 0
+                                print("close")
+                                break
+
+                            elif not np.any(traverse_points[j]) or traverse_points_age[j] > max_age:
+                                traverse_points[j] = far_point
+                                traverse_points_age[j] = 0
+                                print("fill empty tp")
+                                break
+
+                            traverse_points_age[j] += 1
+                            h = 16
+                            w = 16
+                            y1 = traverse_points[j][1] + 6
+                            y2 = traverse_points[j][1] - h
+                            x1 = traverse_points[j][0] - int(w / 2)
+                            x2 = traverse_points[j][0] + int(w / 2)
+                            print(x1)
+
+                    a = int(far_point[1])
+                    b = int(far_point[0])
+
+                    x = pt[a, b][0]
+                    y = pt[a, b][1]
+                    z = pt[a, b][2]
+        
+                    print("index: " + str(i))
+                    print("x " + str(x))
+                    print("y " + str(y))
+                    print("z " + str(z))
+
+                    if x != 0 and y != 0 and z != 0:
+                        teats[teat_cntr] = np.array([x, y, z])
+                        teat_cntr += 1
+
+            if teat_cntr >= 2:
+                udder_midpt = np.sum(teats, axis=0) / teat_cntr
+                print("udder_midpt", udder_midpt)
+                print("teat_cntr", teat_cntr, teats.shape[0], teats)
+
+                y = udder_midpt[1]
+                z = udder_midpt[2]
+                cam_dict = {"XYZ1": {"X": str(x), "Y": str(y), "Z": str(z)}}
+                
+
+            elif teat_cntr == 1:
+                x = teats[0][0]
+                y = teats[0][1]
+                z = teats[0][2]
+                cam_dict = {"XYZ1": {"X": str(x), "Y": str(y), "Z": str(z)}}
+
+            else:
+                cam_dict = {"XYZ1": {"X": str(0), "Y": str(0), "Z": str(0)}}
+                
+            return cam_dict    
+
+        ## main routine
+        detector = apriltag.Detector(searchpath=apriltag._get_dll_path())
+        traverse_points = np.zeros([4,2], dtype = int)
+        max_age, traverse_points_age = 20, np.zeros([4,1], dtype = int)
+        print("start")
+        fg = None
+        try:
+            fg = _open_fg()
+    
+            while not self.should_stop_inference():
+                print('detection loop')
+                try:
+                    fg.sw_trigger()
+                    ok, frame = fg.wait_for_frame().wait_for(timeout_ms)
+                except Exception as exc:
+                    print(f"[Camera] Frame error: {exc}")
+
+                    try:
+                        if fg is not None:
+                            fg.stop()
+                    except Exception:
+                        pass
+
+                    time.sleep(1.0)
+                    fg = _open_fg()
+                    time.sleep(1.0)
+                    continue
+
+                if not ok or frame is None:
+                    print("not ok or frame is None")
+                    time.sleep(0.3)
+                    continue
+
+                a=np.uint8(frame.get_buffer(buffer_id.AMPLITUDE_IMAGE))
+                frame1=np.uint8(frame.get_buffer(buffer_id.RADIAL_DISTANCE_IMAGE))
+                pt = frame.get_buffer(buffer_id.XYZ)
+
+                rows = a.shape[1]
+                cols = a.shape[0]
+                
+                for x in range(0, cols - 1):
+                    for y in range(0, rows -1):
+                        #print(a[x,y])
+                        pixel_value=a[x,y]
+                        if pixel_value>=16200:
+                            a[x,y]=0
+                        if x>=215:
+                            a[x,y]=0
+                            
+                # Define the desired range
+                array=a
+                a, b = 0, 255        
+                
+                # Min and max of the array
+                array_min = np.min(array)
+                array_max = np.max(array)
+
+                # Normalize to the range [a, b]
+                frame2 = a + ( (array - array_min) * (b - a) / (array_max - array_min) )
+                #frame2=cv2.normalize(a, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+        
+                frame3=np.uint8(frame.get_buffer(buffer_id.CONFIDENCE_IMAGE))
+
+                #print(frame2.shape)
+                pt=frame.get_buffer(buffer_id.XYZ)                    
+               
+                c = frame3# np.array([1, 4, 2, 5, 7, 4, 2, 5, 6, 7, 7, 2, 5])
+                mapping = np.arange(c.max() + 1)
+                map_from = np.array([45, 48, 56,  61])
+                map_to = np.array([15, 60, 180, 180])
+                mapping[map_from] = map_to
+                
+                frame3=np.uint8(mapping[c])
+                image_np = live_image_into_numpy_array(frame1, frame3, frame2)#bgr
+                
+                # The input needs to be a tensor, convert it using `tf.convert_to_tensor`.
+                input_tensor = tf.convert_to_tensor(image_np)
+                
+                # The model expects a batch of images, so add an axis with `tf.newaxis`.
+                input_tensor = input_tensor[tf.newaxis, ...]
+                
+                detections = self.detect_fn(input_tensor)
+                #print(f'detections {detections}')
+                
+                # detection_classes should be ints.
+                detections['detection_classes'] = detections['detection_classes'].astype(np.int64)
+                # print(int(frame1.shape[1]))
+                cam_pos = list()
+                defects=list()
+                
+                num_detections = int(detections.pop("num_detections"))
+                detections = {key: value[0, :num_detections].numpy() for key, value in detections.items()}
+                detections["num_detections"] = num_detections
+                detections["detection_classes"] = detections["detection_classes"].astype(np.int64)
+
+                boxes = detections["detection_boxes"]
+                classes = detections["detection_classes"]
+                scores = detections["detection_scores"]                
+                 
+                if(len(boxes)!=0):
+                    indices = np.argsort(boxes[:,0])
+                    sorted_boxes = boxes#[0][indices]
+                    width = int(frame1.shape[1])
+                    height= int(frame1.shape[0])
+                    if(len(boxes)!=0):
+                        indices = np.argsort(boxes[:,0])
+                        sorted_boxes = boxes#[0][indices]
+                        width = int(frame1.shape[1])
+                        height= int(frame1.shape[0])
+                        for i in range(len(boxes)):
+                            if detections['detection_classes'][i]<=2:
+                                                   
+                                ymin = int((boxes[i,0]*height))
+                                xmin = int((boxes[i,1]*width))
+                                ymax = int((boxes[i,2]*height))
+                                xmax = int((boxes[i,3]*width))
+
+                                a=int(xmin+(xmax-xmin)/2)
+                                b=int(ymin+((ymax-ymin)/2))
+                       
+                                x=pt[b, a][0]
+                                y=pt[b, a][1]
+                                z=pt[b, a][2]
+                                c=0
+                                
+                                while(x==0 and c<5):
+                                 b=b-1
+                                 c=c+1
+                                 x=pt[b, a][0]
+                                 y=pt[b, a][1]
+                                 z=pt[b, a][2]
+                                if True: #a>70 and a <105:# and b >25 and b<70 and ymax-ymin<22 and xmax-xmin <18 and z<950 and z>550:
+                                    #print("sending", boxes, detections['detection_classes'][i], a, b, x, y, z)
+                                    cam_dict={'XYZ'+str(i+1): {'X': str(x), 'Y': str(y),'Z': str(z)}}
+                                                     #cam_pos.append(cam_dict)
+                                    cam_pos.append(cam_dict)
+                                    defects.append([a, b])
+                                    #break
+                                else:
+                                      detections['detection_scores'][i]=0
+         
+                print(f'defects {defects[:4]}')                                
+                xyz_dict = process_teats(defects[:4], pt, traverse_points, max_age, traverse_points_age)   #{"XYZ1": {"X": str(x), "Y": str(y), "Z": str(z)}}   
+                print(f'xyz_dict {xyz_dict}')
+                self.send_robot(xyz_dict)  # send to robot from background thread  
+                
+            print("Inference loop stopped")
+            return                
+       
+        finally:
+            if fg is not None:
+                try:
+                    fg.stop()
+                except Exception:
+                    pass                
+                      
+
     def capture_apriltag_transform(
         self,
         *,
@@ -359,7 +686,7 @@ class CameraManager:
                     ok, frame = fg.wait_for_frame().wait_for(timeout_ms)
                 except Exception as exc:
                     print(f"[Camera] Frame error on attempt {attempt + 1}: {exc}")
-                    ok, frame = False, None
+                    ok, frame = False, None    
 
                 if not ok or frame is None:
                     time.sleep(0.1)
@@ -431,7 +758,21 @@ class CameraManager:
                 except Exception:
                     pass
                     
-
+def stop_inference_if_needed(cm: CameraManager, cfg_future_inf):
+    if cfg_future_inf is not None and not cfg_future_inf.done():
+        cm.request_stop_inference()
+    return cfg_future_inf
+    
+def handle_stopping_inference(cfg_future_inf):
+    if cfg_future_inf is not None and cfg_future_inf.done():
+        try:
+            cfg_future_inf.result()
+            logging.info("Inference stopped")
+        except Exception as exc:
+            logging.error("Inference stopped with error: %s", exc)
+            print(f"[Client] Inference stopped with error: {exc}")
+        return None
+    return cfg_future_inf    
 
 def apply_pending_tx_patches(tx_queue: Queue, msg: dict) -> None:
     """Read and apply all pending patches from calibration thread."""
@@ -526,11 +867,11 @@ def receive_all_available_packets(
     return need_cam_cal
 
 
-def maybe_start_calibration(loop, executor, cm: CameraManager, cfg_future, need_cam_cal: int):
-    """Start background calibration if requested and if no calibration is running."""
+def maybe_start_calibration(loop, executor, cm: CameraManager, cfg_future, cfg_future_inf, need_cam_cal: int):
     if (
         need_cam_cal == 1
         and cfg_future is None
+        and (cfg_future_inf is None or cfg_future_inf.done())
         and cm.mode == "inference"
         and cm.state == "free"
     ):
@@ -539,6 +880,28 @@ def maybe_start_calibration(loop, executor, cm: CameraManager, cfg_future, need_
         return loop.run_in_executor(executor, cm.calib_procedure)
 
     return cfg_future
+    
+    
+def maybe_start_inference(
+    loop,
+    executor,
+    cm: CameraManager,
+    cfg_future,
+    cfg_future_inf,
+    need_cam_cal: int,
+):
+    if (
+        need_cam_cal == 0
+        and cfg_future is None
+        and cfg_future_inf is None
+        and cm.mode == "inference"
+        and cm.state == "free"
+    ):
+        print("Inference started")
+        logging.info("Started inference")
+        return loop.run_in_executor(executor, cm.inference_procedure)
+
+    return cfg_future_inf   
 
 
 def handle_finished_calibration(cfg_future):
@@ -553,6 +916,16 @@ def handle_finished_calibration(cfg_future):
 
     return cfg_future
 
+def handle_finished_inference(cfg_future_inf):
+    if cfg_future_inf is not None and cfg_future_inf.done():
+        try:
+            cfg_future_inf.result()
+            logging.info("Inference finished")
+        except Exception as exc:
+            logging.error("Inference failed: %s", exc)
+            print(f"[Client] Inference failed: {exc}")
+        return None
+    return cfg_future_inf
 
 async def main():
     config = load_config()
@@ -592,6 +965,7 @@ async def main():
     }
 
     cfg_future = None
+    cfg_future_inf = None
     need_cam_cal = 0
 
     print("Started loop in camera client...")
@@ -613,19 +987,32 @@ async def main():
                 cm=cm,
             )
 
+            if need_cam_cal == 1:
+                cfg_future_inf = stop_inference_if_needed(cm, cfg_future_inf)
+                cfg_future_inf = handle_stopping_inference(cfg_future_inf)
+
             cfg_future = maybe_start_calibration(
                 loop=loop,
                 executor=executor,
                 cm=cm,
                 cfg_future=cfg_future,
+                cfg_future_inf=cfg_future_inf,
                 need_cam_cal=need_cam_cal,
             )
 
             cfg_future = handle_finished_calibration(cfg_future)
 
-            if need_cam_cal == 0 and cm.mode == "inference" and cm.state == "free":
-                pass
-                # inference logic here
+            if need_cam_cal == 0:
+                cfg_future_inf = maybe_start_inference(
+                    loop=loop,
+                    executor=executor,
+                    cm=cm,
+                    cfg_future=cfg_future,
+                    cfg_future_inf=cfg_future_inf,
+                    need_cam_cal=need_cam_cal,
+                )
+
+            cfg_future_inf = handle_finished_inference(cfg_future_inf)
 
             await asyncio.sleep(0.001)
 

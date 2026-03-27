@@ -87,7 +87,7 @@ def routine_for_camera(server_address, port, mess_input, mess_output):
             #creating a new telegram to send
             # telegram = create_xml(sent_mess_list)    
             telegram = create_xml_fast(sent_mess_list)
-            print("Server sends to camera client:", telegram) 
+            #print("Server sends to camera client:", telegram) 
             #print()   
             SendData(telegram, conn, received_address)
             
