@@ -115,23 +115,40 @@ def plot_frame_history(x_fr_history ):
     axs[2][1].plot(x_fr_history[:, 5])
     # axs[0].axis('off')
 
-def loss(A_batch, B_batch, x_mtx):  
-    
-    tmp_x_mtx = add_row(x_mtx)
-    # TRANSL LOSS
-    ax = tf.linalg.matmul(A_batch, tmp_x_mtx, transpose_b=False) 
-    axb = tf.linalg.matmul(ax, B_batch,  transpose_b=False)
-    transl_axb = axb[:, :-1, -1] # shape[batch, 3]
+#def loss(A_batch, B_batch, x_mtx):  
+#    
+#    tmp_x_mtx = add_row(x_mtx)
+#    # TRANSL LOSS
+#    ax = tf.linalg.matmul(A_batch, tmp_x_mtx, transpose_b=False) 
+#    axb = tf.linalg.matmul(ax, B_batch,  transpose_b=False)
+#    transl_axb = axb[:, :-1, -1] # shape[batch, 3]
+#
+#    # calculation of euclidean distance
+#    b = tf.reshape(transl_axb, [-1,2, 3])
+#    substracted = tf.math.subtract(b[:, 0, :], b[:, 1, :])
+#    squared = tf.square(substracted)
+#    summed = tf.math.reduce_sum(squared, axis = 1)
+#    sqrtted = tf.math.sqrt(summed)
+#    loss_transl = tf.math.reduce_mean(sqrtted)
+#
+#    return loss_transl
+def loss(A_batch, B_batch, x_mtx):
+    tmp_x_mtx = add_row(x_mtx)           # [4,4]
+    ax  = tf.linalg.matmul(A_batch, tmp_x_mtx)   # [N,4,4]
+    axb = tf.linalg.matmul(ax, B_batch)          # [N,4,4]
 
-    # calculation of euclidean distance
-    b = tf.reshape(transl_axb, [-1,2, 3])
-    substracted = tf.math.subtract(b[:, 0, :], b[:, 1, :])
-    squared = tf.square(substracted)
-    summed = tf.math.reduce_sum(squared, axis = 1)
-    sqrtted = tf.math.sqrt(summed)
-    loss_transl = tf.math.reduce_mean(sqrtted)
+    transl_axb = axb[:, :-1, -1]         # [N, 3]
 
+    # "эталон" — средняя трансляция по всем парам
+    mean_t = tf.reduce_mean(transl_axb, axis=0, keepdims=True)  # [1,3]
+
+    # считаем, насколько каждая трансляция отклоняется от общей
+    diff = transl_axb - mean_t          # [N,3]
+    dists = tf.norm(diff, axis=1)       # [N]
+
+    loss_transl = tf.reduce_mean(dists)
     return loss_transl
+
 
 def train_step(x_mtx, loss_func, A_batch, B_batch, opt):
     """

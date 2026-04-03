@@ -155,17 +155,24 @@ class CameraManager:
                 print("saved robot position")
 
                 T = self.capture_apriltag_transform()
+                #print(f"Detected transform mtx {T}")
                 if T is None:
                     rob_frames_list.pop() # remove last robot position
-                    print('popped last robot pose due to no camera detecions')
+                    #print('popped last robot pose due to no camera detecions')
                 else:    
                     cam_frames_list.append(
                         Rotation_matrix(T, "KUKA").extract_frame().to_list()
                     )
                     print('Saved camera detection')
+                    
+                #print(f"Robot data: {len(rob_frames_list)}. Camera data: {len(cam_frames_list)}")    
                 
                 assert len(rob_frames_list) == len(cam_frames_list), "Collected robot positions as not equal to collected camera detections"
-
+                
+                
+            self.send_robot({"Move_next_pt": "1"})
+            print("sent to robot Move_next_pt 1")
+            
             result_dict = optimize(cam_frames_list, rob_frames_list)
 
             self.send_robot({"CAM_CAL_RES": result_dict})
