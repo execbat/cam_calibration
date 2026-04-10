@@ -173,7 +173,14 @@ class CameraManager:
             self.send_robot({"Move_next_pt": "1"})
             print("sent to robot Move_next_pt 1")
             
+            
+            if len(rob_frames_list) % 2 != 0:
+                rob_frames_list.pop()
+                cam_frames_list.pop()
+                
             result_dict = optimize(cam_frames_list, rob_frames_list)
+            
+            print(f"[POINTS COLLECTED] : Rob_positions: {len(rob_frames_list)} Cam_positions {len(cam_frames_list)}")
 
             self.send_robot({"CAM_CAL_RES": result_dict})
             print("sent to the robot result ")

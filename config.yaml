@@ -23,5 +23,5 @@ camera_manager:
   config_path_calibration_setting : "./to_import/calibration_settings.json"
   config_path_work_inference_setting : "./to_import/inference_settings.json"
   root_dir : "./root_dir"
-  num_calib_positions : 10
+  num_calib_positions : 60
 

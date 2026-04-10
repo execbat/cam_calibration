@@ -115,8 +115,7 @@ def plot_frame_history(x_fr_history ):
     axs[2][1].plot(x_fr_history[:, 5])
     # axs[0].axis('off')
 
-#def loss(A_batch, B_batch, x_mtx):  
-#    
+#def loss(A_batch, B_batch, x_mtx):      
 #    tmp_x_mtx = add_row(x_mtx)
 #    # TRANSL LOSS
 #    ax = tf.linalg.matmul(A_batch, tmp_x_mtx, transpose_b=False) 
@@ -132,6 +131,8 @@ def plot_frame_history(x_fr_history ):
 #    loss_transl = tf.math.reduce_mean(sqrtted)
 #
 #    return loss_transl
+
+
 def loss(A_batch, B_batch, x_mtx):
     tmp_x_mtx = add_row(x_mtx)           # [4,4]
     ax  = tf.linalg.matmul(A_batch, tmp_x_mtx)   # [N,4,4]
@@ -150,59 +151,79 @@ def loss(A_batch, B_batch, x_mtx):
     return loss_transl
 
 
-def train_step(x_mtx, loss_func, A_batch, B_batch, opt):
-    """
-    Optimization step implemented without .fit()
 
-    """
-    #################################################
-    with tf.GradientTape() as tape: # recording of the gradients from every step of optimization 
-        loss = loss_func(A_batch, B_batch, x_mtx)
     
-    grad = tape.gradient(loss, x_mtx) # dLoss/dImage
-    opt.apply_gradients([(grad, x_mtx)]) # one step of gradient descent: image = image - lambda*dLoss/dImage                                         
-    ###################################################
-    return loss.numpy()
-    
-def train(x_mtx, loss_func, dataset, opt, num_epochs = 1000):
-    # init the iterators of DATASETs
-    loss_history = list()
-    x_fr_history = np.array([0,0,0,0,0,0])
-    # datasetA_iterator = iter(dataset_A)
-    # datasetB_iterator = iter(dataset_B)
 
-    for epoch in range(num_epochs):
-        # create batches of data
-        for batch in dataset:   
-            A_batch = batch[:, :, :4]
-            B_batch = batch[:, :, 4:]
-            loss_value = train_step(x_mtx, loss_func, A_batch, B_batch, opt)
-            
-            
-        loss_history.append(loss_value)
-        x_fr_history = np.vstack( (x_fr_history, x_mtx_2_kuka_frame(copy.deepcopy(x_mtx)))) # add postprocessed x_mtx to history
-
-        if epoch % 2 == 0:
-            #display.clear_output(wait=True)
-            print('Epoch {}: loss: {}'.format(epoch, loss_value))
-            print(x_mtx.numpy())
-            #plt.plot(loss_history)
-            #plt.show()
-
-        if loss_value < 0.0001:
-            break
-
-    print(x_mtx_2_kuka_frame(x_mtx))
-    return x_mtx_2_kuka_frame(x_mtx), loss_history, x_fr_history
     
 def optimize(cam_frames_list, rob_frames_list):
+    def mm_to_m_frames(frames_list):
+        return [[row[0] / 1000.0, row[1] / 1000.0, row[2] / 1000.0, *row[3:]] for row in frames_list]
+        
+    def train_step(x_mtx, loss_func, A_batch, B_batch):
+        """
+        Optimization step implemented without .fit()
+    
+        """
+        #################################################
+        with tf.GradientTape() as tape: # recording of the gradients from every step of optimization 
+            loss = loss_func(A_batch, B_batch, x_mtx)
+        
+        grad = tape.gradient(loss, x_mtx) # dLoss/dImage
+        opt.apply_gradients([(grad, x_mtx)]) # one step of gradient descent: image = image - lambda*dLoss/dImage                                         
+        ###################################################
+        return loss.numpy()
+
+    def train(x_mtx, loss_func, dataset, num_epochs = 1000):
+        # init the iterators of DATASETs
+        loss_history = list()
+        x_fr_history = np.array([0,0,0,0,0,0])
+        # datasetA_iterator = iter(dataset_A)
+        # datasetB_iterator = iter(dataset_B)
+    
+        for epoch in range(num_epochs):
+            # create batches of data
+            for batch in dataset:   
+                A_batch = batch[:, :, :4]
+                B_batch = batch[:, :, 4:]
+                loss_value = train_step(x_mtx, loss_func, A_batch, B_batch)
+                
+                
+            loss_history.append(loss_value)
+            x_fr_history = np.vstack( (x_fr_history, x_mtx_2_kuka_frame(copy.deepcopy(x_mtx)))) # add postprocessed x_mtx to history
+    
+            if epoch % 2 == 0:
+                #display.clear_output(wait=True)
+                print('Epoch {}: loss: {}'.format(epoch, loss_value))
+                print(x_mtx.numpy())
+                #plt.plot(loss_history)
+                #plt.show()
+    
+            if loss_value < 0.0001:
+                break
+    
+        print(x_mtx_2_kuka_frame(x_mtx))
+        return x_mtx_2_kuka_frame(x_mtx), loss_history, x_fr_history
+
+
+
+
+    # 0. mm -> m
+    cam_frames_list_m = mm_to_m_frames(cam_frames_list)
+    rob_frames_list_m = mm_to_m_frames(rob_frames_list)
+
+
     # 1. build np arrays full of frames converted to transformation matrices
-    data_robot = build_rot_mtx_arr_from_source(rob_frames_list)
-    data_camera = build_rot_mtx_arr_from_source(cam_frames_list)
+    data_robot = build_rot_mtx_arr_from_source(rob_frames_list_m)
+    #print(f"shape data_robot {data_robot.shape}")
+    data_camera = build_rot_mtx_arr_from_source(cam_frames_list_m)
+    #print(f"shape data_camera {data_camera.shape}")
     data_joined = np.concatenate((data_robot, data_camera), -1)
+    #print(f"shape data_joined {data_joined.shape}")
+
     
     # 2. create joined dataset
     dataset_joined = create_dataset_shuffled(data_joined, buffer_size = data_joined.shape[0], batch_size = data_joined.shape[0]) #data_joined.shape[0])
+    #print(f"shape dataset_joined {dataset_joined.shape}")
 
     # 3. create variable to optimize
     var = np.array([
@@ -224,7 +245,7 @@ def optimize(cam_frames_list, rob_frames_list):
     opt = tf.keras.optimizers.Adam(learning_rate=lr_schedule, amsgrad = True) # learning_rate=0.5, amsgrad = True
 
     # START TRAIN PROCESS 
-    result_kuka_frame, loss_history, x_fr_history = train(x_mtx, loss, dataset_joined, opt, num_epochs= 1000)
+    result_kuka_frame, loss_history, x_fr_history = train(x_mtx, loss, dataset_joined, num_epochs= 1000)
 
     # convert result into dict format
     result_dict = dict()
